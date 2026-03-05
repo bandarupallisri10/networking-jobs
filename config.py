@@ -22,7 +22,7 @@ DB_FILE = "networking_jobs.db"
 
 # Path to your resume file (.txt or .pdf)
 # Example: RESUME_PATH = "C:/Users/YourName/Documents/resume.pdf"
-RESUME_PATH = ""
+RESUME_PATH = "C:/Users/itssr/Documents/resume.pdf"
 
 # Max jobs to show per source
 MAX_JOBS_PER_SOURCE = 50
