@@ -68,7 +68,7 @@ def scrape_indeed(title: str) -> list:
     resp = safe_get(session, url)
     if not resp:
         return jobs
-    soup = BeautifulSoup(resp.text, "lxml")
+    soup = BeautifulSoup(resp.text, "html.parser")
     cards = soup.select("div.job_seen_beacon, div.jobsearch-SerpJobCard, div[data-jk]")
     for card in cards[:20]:
         try:
@@ -156,7 +156,7 @@ def scrape_linkedin(title: str) -> list:
     resp = safe_get(session, url)
     if not resp:
         return jobs
-    soup = BeautifulSoup(resp.text, "lxml")
+    soup = BeautifulSoup(resp.text, "html.parser")
     cards = soup.select("div.base-card, li.jobs-search-results__list-item")
     for card in cards[:20]:
         try:
@@ -197,7 +197,7 @@ def scrape_ziprecruiter(title: str) -> list:
     resp = safe_get(session, url)
     if not resp:
         return jobs
-    soup = BeautifulSoup(resp.text, "lxml")
+    soup = BeautifulSoup(resp.text, "html.parser")
     cards = soup.select("article.job_result, div[data-testid='job-card']")
     for card in cards[:20]:
         try:
@@ -243,7 +243,7 @@ def scrape_glassdoor(title: str) -> list:
     resp = safe_get(session, url)
     if not resp:
         return jobs
-    soup = BeautifulSoup(resp.text, "lxml")
+    soup = BeautifulSoup(resp.text, "html.parser")
     cards = soup.select("li[data-test='jobListing'], div.react-job-listing")
     for card in cards[:20]:
         try:
@@ -288,7 +288,7 @@ def scrape_monster(title: str) -> list:
     resp = safe_get(session, url)
     if not resp:
         return jobs
-    soup = BeautifulSoup(resp.text, "lxml")
+    soup = BeautifulSoup(resp.text, "html.parser")
     cards = soup.select("section.card-content, div[data-jobid]")
     for card in cards[:20]:
         try:
@@ -328,7 +328,7 @@ def scrape_careerbuilder(title: str) -> list:
     resp = safe_get(session, url)
     if not resp:
         return jobs
-    soup = BeautifulSoup(resp.text, "lxml")
+    soup = BeautifulSoup(resp.text, "html.parser")
     cards = soup.select("li[data-job-did], div.data-results-content")
     for card in cards[:20]:
         try:
@@ -370,7 +370,7 @@ def scrape_simplyhired(title: str) -> list:
     resp = safe_get(session, url)
     if not resp:
         return jobs
-    soup = BeautifulSoup(resp.text, "lxml")
+    soup = BeautifulSoup(resp.text, "html.parser")
     cards = soup.select("div[data-jobkey], article.SerpJob")
     for card in cards[:20]:
         try:
@@ -414,7 +414,7 @@ def scrape_cybercoders(title: str) -> list:
     resp = safe_get(session, url)
     if not resp:
         return jobs
-    soup = BeautifulSoup(resp.text, "lxml")
+    soup = BeautifulSoup(resp.text, "html.parser")
     cards = soup.select("div.job-listing-item")
     for card in cards[:20]:
         try:
@@ -459,7 +459,7 @@ def scrape_clearancejobs(title: str) -> list:
     resp = safe_get(session, url)
     if not resp:
         return jobs
-    soup = BeautifulSoup(resp.text, "lxml")
+    soup = BeautifulSoup(resp.text, "html.parser")
     cards = soup.select("div[class*='job-card'], article[class*='job']")
     for card in cards[:15]:
         try:
@@ -513,7 +513,7 @@ def scrape_usajobs(title: str) -> list:
         resp = safe_get(make_session(), web_url)
         if not resp:
             return jobs
-        soup = BeautifulSoup(resp.text, "lxml")
+        soup = BeautifulSoup(resp.text, "html.parser")
         cards = soup.select("div.usajobs-search-result--core")
         for card in cards[:15]:
             try:
@@ -612,7 +612,7 @@ def scrape_company_careers(company_name: str, careers_url: str, title: str) -> l
         resp = safe_get(session, search_url)
         if not resp:
             continue
-        soup = BeautifulSoup(resp.text, "lxml")
+        soup = BeautifulSoup(resp.text, "html.parser")
 
         # Try to find job cards with various selectors
         cards = (
