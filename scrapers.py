@@ -8,7 +8,7 @@ import logging
 import requests
 from urllib.parse import urlencode, quote_plus
 from bs4 import BeautifulSoup
-from config import USER_AGENTS, REQUEST_DELAY, JOB_TITLES, LOCATION
+from config import USER_AGENTS, REQUEST_DELAY, JOB_TITLES, LOCATION, JOOBLE_API_KEY, USAJOBS_API_KEY, USAJOBS_EMAIL
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -163,34 +163,40 @@ def scrape_dice(title: str) -> list:
 
 
 # ============================================================
-# LINKEDIN SCRAPER (public job search)
+# LINKEDIN SCRAPER (guest API endpoint - no login required)
 # ============================================================
 def scrape_linkedin(title: str) -> list:
     jobs = []
     session = make_session()
-    session.headers.update({"Referer": "https://www.linkedin.com/"})
+    session.headers.update({
+        "Referer": "https://www.linkedin.com/",
+        "X-Li-Lang": "en_US",
+    })
+    # Use the guest jobs API which returns job card HTML without login
     params = {
         "keywords": title,
         "location": "United States",
-        "f_TPR": "r604800",
+        "geoId": "103644278",
+        "f_TPR": "r604800",  # past week
         "position": "1",
         "pageNum": "0",
+        "start": "0",
     }
-    url = f"https://www.linkedin.com/jobs/search/?{urlencode(params)}"
+    url = f"https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?{urlencode(params)}"
     resp = safe_get(session, url)
     if not resp:
         return jobs
     soup = BeautifulSoup(resp.text, "html.parser")
-    cards = soup.select("div.base-card, li.jobs-search-results__list-item")
+    cards = soup.select("li, div.base-card")
     for card in cards[:20]:
         try:
-            t = card.select_one("h3.base-search-card__title, h3.job-result-card__title")
-            c = card.select_one("h4.base-search-card__subtitle, h4.job-result-card__employer-name")
-            loc = card.select_one("span.job-search-card__location")
+            t = card.select_one("h3.base-search-card__title, span.sr-only, h3")
+            c = card.select_one("h4.base-search-card__subtitle, h4, a[class*='company']")
+            loc = card.select_one("span.job-search-card__location, span[class*='location']")
             link_tag = card.select_one("a.base-card__full-link, a[href*='/jobs/view/']")
-            if not t:
+            if not t or not link_tag:
                 continue
-            job_url = link_tag["href"] if link_tag and link_tag.get("href") else url
+            job_url = link_tag["href"].split("?")[0]  # strip tracking params
             job = _empty_job(
                 title=t.get_text(strip=True),
                 company=c.get_text(strip=True) if c else "Unknown",
@@ -313,13 +319,26 @@ def scrape_monster(title: str) -> list:
     if not resp:
         return jobs
     soup = BeautifulSoup(resp.text, "html.parser")
-    cards = soup.select("section.card-content, div[data-jobid]")
+    # Updated selectors for Monster's current layout
+    cards = soup.select(
+        "section.card-content, div[data-jobid], "
+        "div[class*='job-search-card'], figure[class*='card']"
+    )
     for card in cards[:20]:
         try:
-            t = card.select_one("h2.title, a[class*='job-title']")
-            c = card.select_one("div.company, span[class*='company']")
-            loc = card.select_one("div.location, span[class*='location']")
-            link_tag = card.select_one("a[href*='/jobs/']")
+            t = card.select_one(
+                "h2.title, a[class*='job-title'], "
+                "h3[class*='title'], a[data-bypass]"
+            )
+            c = card.select_one(
+                "div.company, span[class*='company'], "
+                "div[class*='company'], p[class*='name']"
+            )
+            loc = card.select_one(
+                "div.location, span[class*='location'], "
+                "div[class*='location'], p[class*='location']"
+            )
+            link_tag = card.select_one("a[href*='/jobs/'], a[href*='monster.com']")
             if not t:
                 continue
             job_url = link_tag["href"] if link_tag and link_tag.get("href") else url
@@ -353,13 +372,26 @@ def scrape_careerbuilder(title: str) -> list:
     if not resp:
         return jobs
     soup = BeautifulSoup(resp.text, "html.parser")
-    cards = soup.select("li[data-job-did], div.data-results-content")
+    # Updated selectors for CareerBuilder's current layout
+    cards = soup.select(
+        "li[data-job-did], div.data-results-content, "
+        "div[class*='job-listing'], article[class*='job']"
+    )
     for card in cards[:20]:
         try:
-            t = card.select_one("h2.title, span[itemprop='title']")
-            c = card.select_one("div.subtitle, span[itemprop='name']")
-            loc = card.select_one("span[itemprop='addressLocality'], div.location")
-            link_tag = card.select_one("a[href*='/job/']")
+            t = card.select_one(
+                "h2.title, span[itemprop='title'], "
+                "a[class*='job-title'], h3[class*='title']"
+            )
+            c = card.select_one(
+                "div.subtitle, span[itemprop='name'], "
+                "span[class*='company'], div[class*='company']"
+            )
+            loc = card.select_one(
+                "span[itemprop='addressLocality'], div.location, "
+                "span[class*='location']"
+            )
+            link_tag = card.select_one("a[href*='/job/'], a[href*='careerbuilder.com']")
             if not t:
                 continue
             job_url = link_tag["href"] if link_tag and link_tag.get("href") else url
@@ -439,14 +471,27 @@ def scrape_cybercoders(title: str) -> list:
     if not resp:
         return jobs
     soup = BeautifulSoup(resp.text, "html.parser")
-    cards = soup.select("div.job-listing-item")
+    # CyberCoders updated their markup — try multiple selectors
+    cards = soup.select(
+        "div.job-listing-item, div[class*='job-listing'], "
+        "li[class*='job'], div[class*='JobCard']"
+    )
     for card in cards[:20]:
         try:
-            t = card.select_one("div.job-title a")
-            c = card.select_one("div.company-name")
-            loc = card.select_one("div.location")
-            sal = card.select_one("div.wage")
-            link_tag = card.select_one("a[href*='/jobs/']")
+            t = card.select_one(
+                "div.job-title a, a[class*='job-title'], "
+                "h2 a, h3 a, a[class*='title']"
+            )
+            c = card.select_one(
+                "div.company-name, span[class*='company'], "
+                "div[class*='company']"
+            )
+            loc = card.select_one(
+                "div.location, span[class*='location'], "
+                "div[class*='location']"
+            )
+            sal = card.select_one("div.wage, span[class*='salary'], div[class*='salary']")
+            link_tag = t if t and t.name == "a" else card.select_one("a[href*='/jobs/'], a[href*='cybercoders']")
             if not t:
                 continue
             job_url = link_tag["href"] if link_tag and link_tag.get("href") else url
@@ -484,13 +529,27 @@ def scrape_clearancejobs(title: str) -> list:
     if not resp:
         return jobs
     soup = BeautifulSoup(resp.text, "html.parser")
-    cards = soup.select("div[class*='job-card'], article[class*='job']")
+    # Try multiple selectors for ClearanceJobs layout
+    cards = soup.select(
+        "div[class*='job-card'], article[class*='job'], "
+        "li[class*='job'], div[class*='JobCard'], "
+        "div[data-id], section[class*='result']"
+    )
     for card in cards[:15]:
         try:
-            t = card.select_one("h2, h3, a[class*='title']")
-            c = card.select_one("span[class*='company'], div[class*='company']")
-            loc = card.select_one("span[class*='location']")
-            link_tag = card.select_one("a[href*='/jobs/']")
+            t = card.select_one(
+                "h2, h3, a[class*='title'], "
+                "span[class*='title'], div[class*='title'] a"
+            )
+            c = card.select_one(
+                "span[class*='company'], div[class*='company'], "
+                "p[class*='company']"
+            )
+            loc = card.select_one(
+                "span[class*='location'], div[class*='location'], "
+                "p[class*='location']"
+            )
+            link_tag = card.select_one("a[href*='/jobs/'], a[href*='clearancejobs.com']")
             if not t:
                 continue
             job_url = link_tag["href"] if link_tag and link_tag.get("href") else url
@@ -515,28 +574,51 @@ def scrape_clearancejobs(title: str) -> list:
 # ============================================================
 def scrape_usajobs(title: str) -> list:
     jobs = []
-    session = make_session()
-    session.headers.update({
-        "Authorization": "USETOKEN",
-        "User-Agent": "networking-jobs-search/1.0",
-        "Host": "data.usajobs.gov",
-    })
-    params = {
-        "Keyword": title,
-        "LocationName": "United States",
-        "ResultsPerPage": "25",
-        "SortField": "OpenDate",
-        "SortDirection": "Desc",
-    }
-    url = f"https://data.usajobs.gov/api/search?{urlencode(params)}"
-    # USAJobs has a public API - fall back to web scrape if auth fails
-    resp = safe_get(session, url)
-    if not resp:
-        # Fall back to web
-        web_url = f"https://www.usajobs.gov/search/results/?k={quote_plus(title)}&l=United+States"
-        resp = safe_get(make_session(), web_url)
-        if not resp:
-            return jobs
+
+    # Use official API if credentials are configured
+    if USAJOBS_API_KEY and USAJOBS_EMAIL:
+        session = make_session()
+        session.headers.update({
+            "Authorization-Key": USAJOBS_API_KEY,
+            "User-Agent": USAJOBS_EMAIL,
+            "Host": "data.usajobs.gov",
+        })
+        params = {
+            "Keyword": title,
+            "LocationName": "United States",
+            "ResultsPerPage": "25",
+            "SortField": "OpenDate",
+            "SortDirection": "Desc",
+        }
+        url = f"https://data.usajobs.gov/api/search?{urlencode(params)}"
+        resp = safe_get(session, url)
+        if resp:
+            try:
+                data = resp.json()
+                results = data.get("SearchResult", {}).get("SearchResultItems", [])
+                for item in results[:20]:
+                    pos = item.get("MatchedObjectDescriptor", {})
+                    job = _empty_job(
+                        title=pos.get("PositionTitle", title),
+                        company=pos.get("OrganizationName", "US Federal Government"),
+                        url=pos.get("PositionURI", "https://www.usajobs.gov"),
+                        source="USAJobs",
+                        location=", ".join([loc.get("LocationName", "") for loc in pos.get("PositionLocation", [])]),
+                    )
+                    remun = pos.get("PositionRemuneration", [])
+                    if remun:
+                        r = remun[0]
+                        job["salary"] = f"${r.get('MinimumRange','')}-${r.get('MaximumRange','')} {r.get('RateIntervalCode','')}"
+                    jobs.append(job)
+                logger.info(f"[USAJobs] Found {len(jobs)} jobs for '{title}' (API)")
+                return jobs
+            except Exception as e:
+                logger.warning(f"[USAJobs] API error: {e}")
+
+    # Web fallback (no API key needed)
+    web_url = f"https://www.usajobs.gov/search/results/?k={quote_plus(title)}&l=United+States"
+    resp = safe_get(make_session(), web_url)
+    if resp:
         soup = BeautifulSoup(resp.text, "html.parser")
         cards = soup.select("div.usajobs-search-result--core")
         for card in cards[:15]:
@@ -559,35 +641,19 @@ def scrape_usajobs(title: str) -> list:
                 jobs.append(job)
             except Exception:
                 continue
-        return jobs
-    try:
-        data = resp.json()
-        results = data.get("SearchResult", {}).get("SearchResultItems", [])
-        for item in results[:20]:
-            pos = item.get("MatchedObjectDescriptor", {})
-            job = _empty_job(
-                title=pos.get("PositionTitle", title),
-                company=pos.get("OrganizationName", "US Federal Government"),
-                url=pos.get("PositionURI", "https://www.usajobs.gov"),
-                source="USAJobs",
-                location=", ".join([l.get("LocationName", "") for l in pos.get("PositionLocation", [])]),
-            )
-            remun = pos.get("PositionRemuneration", [])
-            if remun:
-                r = remun[0]
-                job["salary"] = f"${r.get('MinimumRange','')}-${r.get('MaximumRange','')} {r.get('RateIntervalCode','')}"
-            jobs.append(job)
-    except Exception as e:
-        logger.warning(f"[USAJobs] API error: {e}")
+
     logger.info(f"[USAJobs] Found {len(jobs)} jobs for '{title}'")
     return jobs
 
 
 # ============================================================
-# JOOBLE SCRAPER
+# JOOBLE SCRAPER (requires free API key from jooble.org/api/about)
 # ============================================================
 def scrape_jooble(title: str) -> list:
     jobs = []
+    if not JOOBLE_API_KEY:
+        logger.info(f"[Jooble] Skipping — no API key set (add JOOBLE_API_KEY to config.py)")
+        return jobs
     session = make_session()
     session.headers.update({"Content-Type": "application/json"})
     payload = {
@@ -596,8 +662,7 @@ def scrape_jooble(title: str) -> list:
         "radius": "",
         "page": "1",
     }
-    # Jooble has a public API
-    url = "https://jooble.org/api/vacancies"
+    url = f"https://jooble.org/api/{JOOBLE_API_KEY}"
     try:
         resp = session.post(url, json=payload, timeout=15)
         data = resp.json()
@@ -615,6 +680,88 @@ def scrape_jooble(title: str) -> list:
     except Exception as e:
         logger.warning(f"[Jooble] Error: {e}")
     logger.info(f"[Jooble] Found {len(jobs)} jobs for '{title}'")
+    return jobs
+
+
+# ============================================================
+# REMOTEOK SCRAPER (free public API, no auth needed)
+# ============================================================
+def scrape_remoteok(title: str) -> list:
+    jobs = []
+    session = make_session()
+    session.headers.update({"Accept": "application/json"})
+    # Map title to RemoteOK tags
+    tag = title.lower().replace(" ", "-")
+    url = f"https://remoteok.com/api?tags={quote_plus(tag)}&limit=20"
+    resp = safe_get(session, url)
+    if not resp:
+        return jobs
+    try:
+        data = resp.json()
+        # First item is metadata, skip it
+        for item in data[1:21]:
+            if not isinstance(item, dict):
+                continue
+            job = _empty_job(
+                title=item.get("position", title),
+                company=item.get("company", "Unknown"),
+                url=item.get("url") or f"https://remoteok.com/remote-jobs/{item.get('id','')}",
+                source="RemoteOK",
+                location="Remote / United States",
+            )
+            tags = item.get("tags", [])
+            job["salary"] = item.get("salary", "Not listed") or "Not listed"
+            job["posted_date"] = item.get("date", "")
+            jobs.append(job)
+    except Exception as e:
+        logger.warning(f"[RemoteOK] Error: {e}")
+    logger.info(f"[RemoteOK] Found {len(jobs)} jobs for '{title}'")
+    return jobs
+
+
+# ============================================================
+# THE MUSE SCRAPER (free public API, no auth needed)
+# ============================================================
+def scrape_themuse(title: str) -> list:
+    jobs = []
+    session = make_session()
+    session.headers.update({"Accept": "application/json"})
+    params = {
+        "category": "IT & Engineering",
+        "location": "United States",
+        "page": "0",
+        "count": "20",
+        "descending": "true",
+    }
+    url = f"https://www.themuse.com/api/public/jobs?{urlencode(params)}"
+    resp = safe_get(session, url)
+    if not resp:
+        return jobs
+    try:
+        data = resp.json()
+        title_lower = title.lower()
+        keywords = set(title_lower.split())
+        for item in data.get("results", []):
+            job_name = item.get("name", "").lower()
+            # Filter by relevance to title keywords
+            if not any(kw in job_name for kw in keywords):
+                continue
+            company = item.get("company", {}).get("name", "Unknown")
+            locations = item.get("locations", [])
+            loc_str = locations[0].get("name", "United States") if locations else "United States"
+            levels = item.get("levels", [])
+            job = _empty_job(
+                title=item.get("name", title),
+                company=company,
+                url=item.get("refs", {}).get("landing_page", "https://www.themuse.com"),
+                source="The Muse",
+                location=loc_str,
+            )
+            job["posted_date"] = item.get("publication_date", "")
+            jobs.append(job)
+    except Exception as e:
+        logger.warning(f"[The Muse] Error: {e}")
+    logger.info(f"[The Muse] Found {len(jobs)} jobs for '{title}'")
     return jobs
 
 
@@ -728,6 +875,8 @@ PORTAL_SCRAPERS = {
     "ClearanceJobs": scrape_clearancejobs,
     "USAJobs": scrape_usajobs,
     "Jooble": scrape_jooble,
+    "RemoteOK": scrape_remoteok,
+    "The Muse": scrape_themuse,
 }
 
 

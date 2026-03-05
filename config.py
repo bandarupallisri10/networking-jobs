@@ -24,6 +24,15 @@ DB_FILE = "networking_jobs.db"
 # Example: RESUME_PATH = "C:/Users/YourName/Documents/resume.pdf"
 RESUME_PATH = "C:/Users/itssr/OneDrive/Desktop/srikanth Bandarupalli_updated resume.docx"
 
+# Jooble API key (free, register at https://jooble.org/api/about)
+# Leave empty to skip Jooble
+JOOBLE_API_KEY = ""
+
+# USAJobs API key (free, register at https://developer.usajobs.gov/APIRequest/)
+# Leave empty to use web fallback
+USAJOBS_API_KEY = ""
+USAJOBS_EMAIL = ""
+
 # Max jobs to show per source
 MAX_JOBS_PER_SOURCE = 50
 
