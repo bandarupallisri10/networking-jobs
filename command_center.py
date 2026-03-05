@@ -88,8 +88,9 @@ def show_menu():
     console.print("  [7] View Jobs by Source")
     console.print("  [8] View Jobs by Company Sector")
     console.print("  [9] Notification Settings")
+    console.print("  [R] Score Jobs Against My Resume")
     console.print("  [0] Exit")
-    return Prompt.ask("\nSelect option", choices=["0","1","2","3","4","5","6","7","8","9"])
+    return Prompt.ask("\nSelect option", choices=["0","1","2","3","4","5","6","7","8","9","r","R"])
 
 
 # ── job list view ─────────────────────────────────────────────────────────────
@@ -111,6 +112,7 @@ def display_jobs(jobs: list, title: str = "Jobs"):
     table.add_column("Location", style="green", min_width=15)
     table.add_column("Salary", style="yellow", min_width=12)
     table.add_column("Source", style="magenta", min_width=12)
+    table.add_column("Match%", min_width=7)
     table.add_column("Status", min_width=8)
     table.add_column("Date", style="dim", min_width=10)
 
@@ -125,6 +127,17 @@ def display_jobs(jobs: list, title: str = "Jobs"):
     for i, job in enumerate(jobs, 1):
         status_display = status_colors.get(job.get("status", "new"), job.get("status", "new").upper())
         found = job.get("found_date", "")[:10] if job.get("found_date") else ""
+        score = job.get("resume_score")
+        if score is None:
+            score_display = "[dim]—[/dim]"
+        elif score >= 75:
+            score_display = f"[bold green]{score}%[/bold green]"
+        elif score >= 50:
+            score_display = f"[yellow]{score}%[/yellow]"
+        elif score >= 25:
+            score_display = f"[orange3]{score}%[/orange3]"
+        else:
+            score_display = f"[red]{score}%[/red]"
         table.add_row(
             str(i),
             job.get("title", "")[:50],
@@ -132,6 +145,7 @@ def display_jobs(jobs: list, title: str = "Jobs"):
             job.get("location", "")[:20],
             job.get("salary", "Not listed")[:15],
             job.get("source", "")[:15],
+            score_display,
             status_display,
             found,
         )
@@ -160,6 +174,12 @@ def job_detail_menu(jobs: list):
 
 def manage_job(job: dict):
     """Show detail panel for a single job with action options."""
+    score = job.get("resume_score")
+    score_line = ""
+    if score is not None:
+        from resume_matcher import score_color
+        score_line = f"\nResume Match: [{score_color(score)}]{score}%[/{score_color(score)}]"
+
     console.print(Panel(
         f"[bold]{job['title']}[/bold]\n"
         f"Company:  [cyan]{job['company']}[/cyan]\n"
@@ -168,7 +188,8 @@ def manage_job(job: dict):
         f"Source:   [magenta]{job['source']}[/magenta]\n"
         f"Status:   {job.get('status','new').upper()}\n"
         f"Posted:   {job.get('posted_date', 'Unknown')}\n"
-        f"Found:    {job.get('found_date','')[:19]}\n\n"
+        f"Found:    {job.get('found_date','')[:19]}"
+        f"{score_line}\n\n"
         f"URL: [link={job['url']}]{job['url'][:80]}[/link]",
         title="Job Detail",
         border_style="cyan",
@@ -180,9 +201,10 @@ def manage_job(job: dict):
     console.print("  [M] Mark as Applied")
     console.print("  [R] Reject / Not interested")
     console.print("  [N] Add Notes")
+    console.print("  [C] Check Resume Match Score")
     console.print("  [B] Back")
 
-    action = Prompt.ask("Action", choices=["a","s","m","r","n","b","A","S","M","R","N","B"]).lower()
+    action = Prompt.ask("Action", choices=["a","s","m","r","n","c","b","A","S","M","R","N","C","B"]).lower()
 
     if action == "a":
         _apply_now(job)
@@ -199,6 +221,113 @@ def manage_job(job: dict):
         notes = Prompt.ask("Enter notes")
         db.update_job_status(job["id"], job.get("status", "new"), notes=notes)
         console.print("[green]Notes saved.[/green]")
+    elif action == "c":
+        _score_job(job)
+
+
+def _get_resume_text() -> str:
+    """Load resume text from configured path."""
+    from config import RESUME_PATH
+    from resume_matcher import load_resume
+    if not RESUME_PATH:
+        console.print(Panel(
+            "[yellow]No resume path configured![/yellow]\n\n"
+            "Edit [bold]config.py[/bold] and set:\n"
+            '[dim]RESUME_PATH = "C:/Users/YourName/Documents/resume.pdf"[/dim]\n\n'
+            "Supports [bold].txt[/bold] and [bold].pdf[/bold] files.",
+            border_style="yellow",
+            title="Resume Not Set",
+        ))
+        return ""
+    text = load_resume(RESUME_PATH)
+    if not text:
+        console.print(f"[red]Could not read resume from:[/red] {RESUME_PATH}")
+    return text
+
+
+def _score_job(job: dict):
+    """Score a single job against the resume and save result."""
+    from resume_matcher import score_resume, score_color
+    from scrapers import fetch_job_description
+
+    resume_text = _get_resume_text()
+    if not resume_text:
+        return
+
+    # Use stored description or fetch it now
+    desc = job.get("description") or ""
+    if not desc or len(desc) < 50:
+        with console.status(f"[cyan]Fetching job description from {job['source']}..."):
+            desc = fetch_job_description(job["url"])
+            if desc:
+                db.update_job_description(job["id"], desc)
+
+    job_text = f"{job['title']} {job['company']} {desc}"
+    result = score_resume(resume_text, job_text)
+    score = result["score"]
+    db.update_resume_score(job["id"], score)
+    job["resume_score"] = score  # update in-memory too
+
+    color = score_color(score)
+    matched_str = ", ".join(result["matched"]) or "none"
+    missing_str = ", ".join(result["missing"]) or "none"
+
+    console.print(Panel(
+        f"[bold]Resume Match Score: [{color}]{score}%[/{color}][/bold]\n\n"
+        f"[green]Matched keywords ({len(result['matched'])}/{result['total_kw']}):[/green]\n"
+        f"  {matched_str}\n\n"
+        f"[yellow]Missing keywords (add to resume):[/yellow]\n"
+        f"  {missing_str}",
+        title=f"Resume Match — {job['title'][:40]}",
+        border_style=color,
+    ))
+    Prompt.ask("\nPress Enter to continue")
+
+
+def score_all_jobs():
+    """Score all unscored new jobs against the resume."""
+    from resume_matcher import score_resume, score_color
+    from scrapers import fetch_job_description
+
+    resume_text = _get_resume_text()
+    if not resume_text:
+        return
+
+    jobs = db.get_jobs(status="new", limit=200)
+    unscored = [j for j in jobs if j.get("resume_score") is None]
+
+    if not unscored:
+        console.print("[yellow]All new jobs already scored. Use option [2] to view all jobs.[/yellow]")
+        Prompt.ask("\nPress Enter to continue")
+        return
+
+    console.print(f"\n[cyan]Scoring {len(unscored)} jobs against your resume...[/cyan]")
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Scoring...", total=len(unscored))
+        for job in unscored:
+            desc = job.get("description") or ""
+            if not desc or len(desc) < 50:
+                desc = fetch_job_description(job["url"])
+                if desc:
+                    db.update_job_description(job["id"], desc)
+            job_text = f"{job['title']} {job['company']} {desc}"
+            result = score_resume(resume_text, job_text)
+            db.update_resume_score(job["id"], result["score"])
+            progress.advance(task)
+            progress.update(task, description=f"Scored: {job['title'][:40]} → {result['score']}%")
+
+    # Show top 10 matches
+    scored = db.get_jobs(status="new", limit=200)
+    scored = [j for j in scored if j.get("resume_score") is not None]
+    scored.sort(key=lambda x: x["resume_score"], reverse=True)
+    console.print(f"\n[bold green]Done! Top matches:[/bold green]")
+    display_jobs(scored[:15], "Top Resume Matches")
+    job_detail_menu(scored[:15])
 
 
 def _apply_now(job: dict):
@@ -360,6 +489,9 @@ def main():
             except (ValueError, KeyboardInterrupt):
                 pass
 
+        elif choice.lower() == "r":
+            score_all_jobs()
+
         elif choice == "9":
             console.print(Panel(
                 "[bold]Notification Schedule[/bold]\n\n"
@@ -374,7 +506,7 @@ def main():
             Prompt.ask("\nPress Enter to continue")
 
         # Pause before re-rendering dashboard
-        if choice not in ["6", "9"]:
+        if choice not in ["6", "9", "r", "R"]:
             try:
                 Prompt.ask("\nPress Enter to return to main menu")
             except KeyboardInterrupt:

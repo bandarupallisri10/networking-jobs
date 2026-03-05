@@ -32,8 +32,11 @@ def init_db():
             status TEXT DEFAULT 'new',
             applied_date TEXT,
             notes TEXT,
+            resume_score INTEGER,
             UNIQUE(url)
         );
+        -- Add resume_score to existing databases that predate this column
+        CREATE TABLE IF NOT EXISTS _migration_done (id INTEGER PRIMARY KEY);
 
         CREATE TABLE IF NOT EXISTS notifications (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,6 +51,12 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_jobs_title ON jobs(title);
         CREATE INDEX IF NOT EXISTS idx_jobs_found_date ON jobs(found_date);
     """)
+    # Migrate existing databases: add resume_score column if missing
+    try:
+        cur.execute("ALTER TABLE jobs ADD COLUMN resume_score INTEGER")
+        conn.commit()
+    except Exception:
+        pass  # Column already exists
     conn.commit()
     conn.close()
 
@@ -152,6 +161,22 @@ def get_sources_summary():
     rows = cur.fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def update_resume_score(job_id: int, score: int):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("UPDATE jobs SET resume_score=? WHERE id=?", (score, job_id))
+    conn.commit()
+    conn.close()
+
+
+def update_job_description(job_id: int, description: str):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("UPDATE jobs SET description=? WHERE id=?", (description, job_id))
+    conn.commit()
+    conn.close()
 
 
 def log_notification(notif_type: str, jobs_found: int, message: str):

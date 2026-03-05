@@ -27,15 +27,39 @@ def make_session():
     return s
 
 
-def safe_get(session, url, timeout=15):
+def safe_get(session, url, timeout=8):
     try:
-        time.sleep(REQUEST_DELAY + random.uniform(0.5, 1.5))
+        time.sleep(REQUEST_DELAY)
         resp = session.get(url, timeout=timeout, allow_redirects=True)
         resp.raise_for_status()
         return resp
     except Exception as e:
         logger.warning(f"[HTTP] Failed {url}: {e}")
         return None
+
+
+def fetch_job_description(url: str) -> str:
+    """Fetch and extract the description text from a job posting URL."""
+    session = make_session()
+    resp = safe_get(session, url, timeout=8)
+    if not resp:
+        return ""
+    soup = BeautifulSoup(resp.text, "html.parser")
+    # Remove nav/header/footer noise
+    for tag in soup(["script", "style", "nav", "header", "footer", "aside"]):
+        tag.decompose()
+    # Try known job description containers first
+    for selector in [
+        "div[class*='description']", "div[class*='job-detail']",
+        "div[class*='jobDetail']", "section[class*='description']",
+        "div#job-description", "div.job_description", "div.jobsearch-jobDescriptionText",
+    ]:
+        el = soup.select_one(selector)
+        if el:
+            return el.get_text(" ", strip=True)[:3000]
+    # Fallback: main content
+    main = soup.select_one("main") or soup.select_one("article") or soup.body
+    return main.get_text(" ", strip=True)[:3000] if main else ""
 
 
 def _empty_job(title, company, url, source, location="United States"):
