@@ -23,8 +23,8 @@ DB_FILE = "networking_jobs.db"
 # Max jobs to show per source
 MAX_JOBS_PER_SOURCE = 50
 
-# Request delay (seconds) between requests to avoid rate limiting
-REQUEST_DELAY = 2
+# Request delay (seconds) between requests per session (parallel scrapers use separate sessions)
+REQUEST_DELAY = 0.5
 
 # User agent rotation
 USER_AGENTS = [

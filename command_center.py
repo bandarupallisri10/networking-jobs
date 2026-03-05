@@ -223,9 +223,9 @@ def _apply_now(job: dict):
 
 def run_scraper_now():
     """Run the full job scraping job from the command center."""
-    from scrapers import PORTAL_SCRAPERS, scrape_company_careers
+    from scrapers import PORTAL_SCRAPERS, scrape_all_portals, scrape_all_companies
     from config import JOB_TITLES, US_COMPANIES
-    import database as db_mod
+    import threading
 
     console.print(Panel("[bold cyan]Running Job Scraper...[/bold cyan]", border_style="cyan"))
 
@@ -237,6 +237,7 @@ def run_scraper_now():
 
     titles = JOB_TITLES
     total_new = 0
+    lock = threading.Lock()
 
     with Progress(
         SpinnerColumn(),
@@ -245,29 +246,34 @@ def run_scraper_now():
     ) as progress:
         for title in titles:
             if scope in ["1", "3"]:
-                for portal_name, scraper_fn in PORTAL_SCRAPERS.items():
-                    task = progress.add_task(f"[cyan]Scraping {portal_name}: {title}...", total=None)
-                    try:
-                        jobs = scraper_fn(title)
-                        new_count = sum(db.upsert_job(j) for j in jobs)
-                        total_new += new_count
-                        progress.update(task, description=f"[green]{portal_name}: {title} — {len(jobs)} found, {new_count} new")
-                    except Exception as e:
-                        progress.update(task, description=f"[red]{portal_name}: {title} — Error: {e}")
-                    progress.remove_task(task)
+                task = progress.add_task(f"[cyan]Scraping portals for: {title} (parallel)...", total=None)
+                found_counts = []
+
+                def portal_cb(name, count, t=title):
+                    found_counts.append(count)
+                    progress.update(task, description=f"[cyan]Portals [{title}]: {len(found_counts)}/{len(PORTAL_SCRAPERS)} done, {sum(found_counts)} found")
+
+                jobs = scrape_all_portals(title, progress_callback=portal_cb)
+                with lock:
+                    new_count = sum(db.upsert_job(j) for j in jobs)
+                    total_new += new_count
+                progress.update(task, description=f"[green]Portals [{title}]: {len(jobs)} found, {new_count} new")
+                progress.remove_task(task)
 
             if scope in ["2", "3"]:
-                for company_name, info in US_COMPANIES.items():
-                    task = progress.add_task(f"[magenta]Checking {company_name}: {title}...", total=None)
-                    try:
-                        from scrapers import scrape_company_careers
-                        jobs = scrape_company_careers(company_name, info["careers_url"], title)
-                        new_count = sum(db.upsert_job(j) for j in jobs)
-                        total_new += new_count
-                        progress.update(task, description=f"[green]{company_name}: {title} — {len(jobs)} found, {new_count} new")
-                    except Exception as e:
-                        progress.update(task, description=f"[red]{company_name}: {title} — Error")
-                    progress.remove_task(task)
+                task = progress.add_task(f"[magenta]Checking company pages for: {title} (parallel)...", total=None)
+                done_companies = []
+
+                def company_cb(name, count, t=title):
+                    done_companies.append(name)
+                    progress.update(task, description=f"[magenta]Companies [{title}]: {len(done_companies)}/{len(US_COMPANIES)} done")
+
+                jobs = scrape_all_companies(title, US_COMPANIES, progress_callback=company_cb)
+                with lock:
+                    new_count = sum(db.upsert_job(j) for j in jobs)
+                    total_new += new_count
+                progress.update(task, description=f"[green]Companies [{title}]: {len(jobs)} found, {new_count} new")
+                progress.remove_task(task)
 
     from notifier import send_new_jobs_alert
     send_new_jobs_alert(total_new)

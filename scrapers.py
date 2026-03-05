@@ -707,27 +707,57 @@ PORTAL_SCRAPERS = {
 }
 
 
-def scrape_all_portals(title: str) -> list:
-    """Scrape all job portals for a given title."""
+def scrape_all_portals(title: str, progress_callback=None) -> list:
+    """Scrape all job portals for a given title in parallel."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     all_jobs = []
-    for portal_name, scraper_fn in PORTAL_SCRAPERS.items():
+
+    def _scrape(portal_name, scraper_fn):
         try:
             jobs = scraper_fn(title)
-            all_jobs.extend(jobs)
+            if progress_callback:
+                progress_callback(portal_name, len(jobs))
+            return jobs
         except Exception as e:
             logger.error(f"[{portal_name}] Scraper error: {e}")
+            return []
+
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        futures = {
+            executor.submit(_scrape, name, fn): name
+            for name, fn in PORTAL_SCRAPERS.items()
+        }
+        for future in as_completed(futures):
+            all_jobs.extend(future.result())
+
     return all_jobs
 
 
-def scrape_all_companies(title: str, companies: dict) -> list:
-    """Scrape all company career pages for a given title."""
+def scrape_all_companies(title: str, companies: dict, progress_callback=None) -> list:
+    """Scrape all company career pages for a given title in parallel."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     from config import US_COMPANIES
+
     target = companies if companies else US_COMPANIES
     all_jobs = []
-    for company_name, info in target.items():
+
+    def _scrape(company_name, info):
         try:
             jobs = scrape_company_careers(company_name, info["careers_url"], title)
-            all_jobs.extend(jobs)
+            if progress_callback:
+                progress_callback(company_name, len(jobs))
+            return jobs
         except Exception as e:
             logger.error(f"[{company_name}] Career page error: {e}")
+            return []
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = {
+            executor.submit(_scrape, name, info): name
+            for name, info in target.items()
+        }
+        for future in as_completed(futures):
+            all_jobs.extend(future.result())
+
     return all_jobs
