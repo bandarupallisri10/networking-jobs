@@ -47,7 +47,7 @@ KEYWORDS = {
 
 
 def load_resume(path: str) -> str:
-    """Load resume text from .txt or .pdf file."""
+    """Load resume text from .txt, .pdf, or .docx file."""
     p = Path(path)
     if not p.exists():
         return ""
@@ -65,6 +65,13 @@ def load_resume(path: str) -> str:
                 return " ".join(page.extract_text() or "" for page in reader.pages)
         except ImportError:
             return "[PDF not readable — install pdfplumber: pip install pdfplumber]"
+    if p.suffix.lower() == ".docx":
+        try:
+            import docx
+            doc = docx.Document(str(p))
+            return " ".join(para.text for para in doc.paragraphs)
+        except ImportError:
+            return "[DOCX not readable — install python-docx: pip install python-docx]"
     try:
         return p.read_text(encoding="utf-8", errors="ignore")
     except Exception:
