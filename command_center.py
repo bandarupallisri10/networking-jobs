@@ -89,8 +89,9 @@ def show_menu():
     console.print("  [8] View Jobs by Company Sector")
     console.print("  [9] Notification Settings")
     console.print("  [R] Score Jobs Against My Resume")
+    console.print("  [A] Parakeeti AI — Senior Network Engineer Assistant")
     console.print("  [0] Exit")
-    return Prompt.ask("\nSelect option", choices=["0","1","2","3","4","5","6","7","8","9","r","R"])
+    return Prompt.ask("\nSelect option", choices=["0","1","2","3","4","5","6","7","8","9","r","R","a","A"])
 
 
 # ── job list view ─────────────────────────────────────────────────────────────
@@ -492,6 +493,11 @@ def main():
         elif choice.lower() == "r":
             score_all_jobs()
 
+        elif choice.lower() == "a":
+            from parakeeti_ai import run_chat
+            run_chat()
+            continue  # skip the "Press Enter" prompt; chat already handles flow
+
         elif choice == "9":
             console.print(Panel(
                 "[bold]Notification Schedule[/bold]\n\n"
@@ -506,7 +512,7 @@ def main():
             Prompt.ask("\nPress Enter to continue")
 
         # Pause before re-rendering dashboard
-        if choice not in ["6", "9", "r", "R"]:
+        if choice not in ["6", "9", "r", "R", "a", "A"]:
             try:
                 Prompt.ask("\nPress Enter to return to main menu")
             except KeyboardInterrupt:
